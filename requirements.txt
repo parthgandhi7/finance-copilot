@@ -6,3 +6,7 @@ alembic==1.16.2
 pgvector==0.3.6
 pydantic-settings==2.10.1
 python-multipart==0.0.20
+pymupdf==1.25.5
+docling==2.40.0
+pytesseract==0.3.13
+pillow==11.2.1
