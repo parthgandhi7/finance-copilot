@@ -73,3 +73,55 @@ uvicorn app.main:app --reload
 - Logging is configured centrally in `app/core/logging.py`.
 - Environment config uses `pydantic-settings` in `app/core/settings.py`.
 - Architecture is modular with clear boundaries for API, services, parsers, AI, and persistence.
+
+
+## Financial Document Extraction Engine
+
+`POST /api/v1/documents/upload-and-extract` now returns a strict, validated extraction payload under `extracted.structured_financial_extraction`.
+
+Structured fields extracted:
+- insurer
+- policy type
+- sum insured
+- waiting periods
+- exclusions
+- mutual fund names
+- folios
+- portfolio value
+
+Validation/retries:
+- extraction output is validated against strict Pydantic schemas (`extra=forbid`)
+- engine retries up to 3 times when model output fails schema validation
+- if validation still fails, API returns a safe default schema with `validated=false` and an error message
+
+### Frontend testing flow
+
+1. Start backend:
+
+```bash
+docker compose up --build
+```
+
+2. Start frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+3. Open `http://localhost:3000/upload` and upload a PDF.
+
+4. In parallel, verify backend extraction response from API directly:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/documents/upload-and-extract \
+  -F "file=@/absolute/path/to/sample.pdf"
+```
+
+5. Confirm response includes:
+- `extracted.raw_text`
+- `extracted.structured_sections`
+- `extracted.structured_financial_extraction.validated`
+- `extracted.structured_financial_extraction.data.insurance`
+- `extracted.structured_financial_extraction.data.mutual_funds`

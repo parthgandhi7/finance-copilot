@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from app.ai.financial_extraction_engine import FinancialExtractionEngine
+
 import fitz  # PyMuPDF
 
 
@@ -60,6 +62,10 @@ class PDFExtractionService:
             structured_sections = self._heuristic_sections_from_text(raw_text)
 
         semantic_chunks = self._semantic_chunk_sections(structured_sections)
+        structured_financial_extraction = FinancialExtractionEngine().extract(
+            raw_text=raw_text,
+            document_hints=self._infer_document_type(path.name, raw_text),
+        )
 
         return {
             "document_type_hints": self._infer_document_type(path.name, raw_text),
@@ -67,6 +73,7 @@ class PDFExtractionService:
             "structured_sections": structured_sections,
             "tables": tables,
             "semantic_chunks": semantic_chunks,
+            "structured_financial_extraction": structured_financial_extraction,
             "extraction_metadata": {
                 "source_file": str(path),
                 "page_count": pages,
