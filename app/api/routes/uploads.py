@@ -40,7 +40,11 @@ async def upload_and_extract_document(
 ) -> ExtractedDocumentResponse:
     document = await DocumentService(session).save_upload(file)
     extraction = PDFExtractionService().extract(document.storage_path)
-
-    response = ExtractedDocumentResponse.model_validate(document, from_attributes=True)
-    response.extracted = extraction
-    return response
+    return ExtractedDocumentResponse(
+        id=document.id,
+        filename=document.filename,
+        content_type=document.content_type,
+        file_size=document.file_size,
+        storage_path=document.storage_path,
+        extracted=extraction,
+    )

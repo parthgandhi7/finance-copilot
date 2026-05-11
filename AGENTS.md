@@ -2,6 +2,8 @@
 
 Finance Copilot is an AI-powered personal financial intelligence platform.
 
+Always ask clarifying questions if any before doing anything. Do not assume
+
 Core philosophy:
 - structured extraction first
 - reasoning second

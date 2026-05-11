@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -78,7 +78,7 @@ class PDFExtractionService:
                 "source_file": str(path),
                 "page_count": pages,
                 "used_ocr_fallback": used_ocr,
-                "steps": [step.__dict__ for step in metadata_steps],
+                "steps": [asdict(step) for step in metadata_steps],
             },
         }
 
@@ -90,43 +90,43 @@ class PDFExtractionService:
     def _extract_docling_structure(self, pdf_path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         try:
             from docling.document_converter import DocumentConverter
-        except ImportError:
+
+            converter = DocumentConverter()
+            result = converter.convert(str(pdf_path))
+
+            sections: list[dict[str, Any]] = []
+            tables: list[dict[str, Any]] = []
+
+            doc = result.document
+            for node in getattr(doc, "iterate_items", lambda: [])():
+                label = str(getattr(node, "label", "")).lower()
+                text = (getattr(node, "text", "") or "").strip()
+                if not text:
+                    continue
+
+                if "heading" in label or label in {"title", "section_header"}:
+                    sections.append({"heading": text, "content": "", "source": "docling"})
+                    continue
+
+                if "table" in label:
+                    table_rows = getattr(node, "data", None) or []
+                    tables.append(
+                        {
+                            "title": getattr(node, "caption", None),
+                            "rows": table_rows,
+                            "source": "docling",
+                        }
+                    )
+                    continue
+
+                if sections:
+                    sections[-1]["content"] = (sections[-1]["content"] + "\n" + text).strip()
+                else:
+                    sections.append({"heading": "Document", "content": text, "source": "docling"})
+
+            return sections, tables
+        except Exception:
             return [], []
-
-        converter = DocumentConverter()
-        result = converter.convert(str(pdf_path))
-
-        sections: list[dict[str, Any]] = []
-        tables: list[dict[str, Any]] = []
-
-        doc = result.document
-        for node in getattr(doc, "iterate_items", lambda: [])():
-            label = str(getattr(node, "label", "")).lower()
-            text = (getattr(node, "text", "") or "").strip()
-            if not text:
-                continue
-
-            if "heading" in label or label in {"title", "section_header"}:
-                sections.append({"heading": text, "content": "", "source": "docling"})
-                continue
-
-            if "table" in label:
-                table_rows = getattr(node, "data", None) or []
-                tables.append(
-                    {
-                        "title": getattr(node, "caption", None),
-                        "rows": table_rows,
-                        "source": "docling",
-                    }
-                )
-                continue
-
-            if sections:
-                sections[-1]["content"] = (sections[-1]["content"] + "\n" + text).strip()
-            else:
-                sections.append({"heading": "Document", "content": text, "source": "docling"})
-
-        return sections, tables
 
     def _extract_with_ocr(self, pdf_path: Path) -> str:
         try:
