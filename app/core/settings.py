@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     )
 
     upload_dir: str = "uploads"
+    openai_api_key: str | None = None
+    embedding_model: str = "text-embedding-3-small"
 
 
 settings = Settings()

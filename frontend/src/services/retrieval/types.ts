@@ -1,64 +1,55 @@
-export type ClassificationMethod = "rule" | "model";
-
 export interface RetrievalTrace {
   query: string;
-  queryClassification: {
+  classification: {
     label: string;
     confidence: number;
-    method: ClassificationMethod;
+    method: "rule" | "model";
   };
   retrieval: {
     chunks: RetrievedChunk[];
-    appliedFilters: RetrievalFilter[];
-    retrievalLatencyMs: number;
+    filters: Array<{ type: string; value: string }> | Record<string, string>;
+    latency_ms: number;
   };
-  promptContext: {
-    systemPrompt: string;
-    assembledContext: string;
-    tokenEstimate?: number;
+  prompt_context: {
+    assembled_context: string;
+    estimated_tokens?: number;
   };
   response: {
     answer: string;
     citations: Citation[];
     grounded: boolean;
-    confidence?: number;
   };
   insights: Insight[];
 }
 
 export interface RetrievedChunk {
-  chunkId: string;
-  documentId: string;
-  sectionTitle?: string;
-  pageNumber?: number;
-  similarityScore: number;
-  chunkType?: string;
-  preview: string;
-  retrievalReason?: string;
-}
-
-export interface RetrievalFilter {
-  type: string;
-  value: string;
+  chunk_id: string;
+  document_id: string;
+  section_title?: string;
+  page_number?: number;
+  similarity_score: number;
+  chunk_type?: string;
+  content: string;
+  retrieval_reason?: string;
 }
 
 export interface Citation {
-  chunkId: string;
-  sectionTitle?: string;
+  chunk_id: string;
+  section_title?: string;
 }
 
 export interface Insight {
-  insightId: string;
-  insightType: string;
+  insight_id: string;
+  insight_type: string;
   severity: "low" | "medium" | "high";
   title: string;
   description: string;
-  sourceChunks: string[];
-  generatedBy: "rule" | "llm";
+  source_chunks: string[];
+  generated_by: "rule" | "llm";
 }
 
 export interface RetrievalDebugRequest {
   query: string;
   topK?: number;
-  filters?: RetrievalFilter[];
+  filters?: Record<string, string>;
 }

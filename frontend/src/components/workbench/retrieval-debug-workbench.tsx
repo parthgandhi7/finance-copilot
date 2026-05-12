@@ -57,18 +57,18 @@ export function RetrievalDebugWorkbench() {
           <TabsContent value="retrieval" className="grid gap-3 md:grid-cols-2">
             <Card className="p-4 space-y-3">
               <h2 className="font-medium">Intent Classification</h2>
-              <div className="text-sm">{trace.queryClassification.label}</div>
-              <div className="text-sm text-muted-foreground">Method: {trace.queryClassification.method}</div>
-              <div className="text-sm text-muted-foreground">Confidence: {trace.queryClassification.confidence.toFixed(2)}</div>
+              <div className="text-sm">{trace.classification.label}</div>
+              <div className="text-sm text-muted-foreground">Method: {trace.classification.method}</div>
+              <div className="text-sm text-muted-foreground">Confidence: {trace.classification.confidence.toFixed(2)}</div>
             </Card>
 
             <Card className="p-4 space-y-3">
               <h2 className="font-medium">Retrieval Trace</h2>
-              <div className="text-sm text-muted-foreground">Latency: {trace.retrieval.retrievalLatencyMs}ms</div>
+              <div className="text-sm text-muted-foreground">Latency: {trace.retrieval.latency_ms}ms</div>
               <div className="text-sm">Metadata Filters</div>
               <div className="flex flex-wrap gap-2">
-                {trace.retrieval.appliedFilters.map((filter) => (
-                  <Badge key={`${filter.type}-${filter.value}`}>{filter.type}: {filter.value}</Badge>
+                {Object.entries(trace.retrieval.filters ?? {}).map(([key, value]) => (
+                  <Badge key={`${key}-${value}`}>{key}: {String(value)}</Badge>
                 ))}
               </div>
             </Card>
@@ -77,16 +77,16 @@ export function RetrievalDebugWorkbench() {
               <h2 className="font-medium">Retrieved Chunks + Similarity Scores</h2>
               <div className="space-y-2">
                 {trace.retrieval.chunks.map((chunk) => (
-                  <details key={chunk.chunkId} className="rounded-md border border-border p-3">
+                  <details key={chunk.chunk_id} className="rounded-md border border-border p-3">
                     <summary className="cursor-pointer text-sm font-medium">
-                      {chunk.chunkId} · score {chunk.similarityScore.toFixed(2)} · {chunk.sectionTitle ?? "Untitled"}
+                      {chunk.chunk_id} · score {chunk.similarity_score.toFixed(2)} · {chunk.section_title ?? "Untitled"}
                     </summary>
                     <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                      <div>document: {chunk.documentId}</div>
-                      <div>page: {chunk.pageNumber ?? "n/a"}</div>
-                      <div>type: {chunk.chunkType ?? "n/a"}</div>
-                      <div>reason: {chunk.retrievalReason ?? "n/a"}</div>
-                      <p className="rounded bg-muted p-2 text-foreground">{chunk.preview}</p>
+                      <div>document: {chunk.document_id}</div>
+                      <div>page: {chunk.page_number ?? "n/a"}</div>
+                      <div>type: {chunk.chunk_type ?? "n/a"}</div>
+                      <div>reason: {chunk.retrieval_reason ?? "n/a"}</div>
+                      <p className="rounded bg-muted p-2 text-foreground">{chunk.content}</p>
                     </div>
                   </details>
                 ))}
@@ -97,14 +97,14 @@ export function RetrievalDebugWorkbench() {
           <TabsContent value="prompt">
             <Card className="p-4 space-y-3">
               <h2 className="font-medium">Prompt Context Viewer</h2>
-              <div className="text-sm text-muted-foreground">Token Estimate: {trace.promptContext.tokenEstimate ?? "n/a"}</div>
+              <div className="text-sm text-muted-foreground">Token Estimate: {trace.prompt_context.estimated_tokens ?? "n/a"}</div>
               <details open>
                 <summary className="cursor-pointer text-sm font-medium">System Prompt</summary>
-                <pre className="mt-2 overflow-x-auto rounded bg-muted p-2 text-xs">{trace.promptContext.systemPrompt}</pre>
+                <pre className="mt-2 overflow-x-auto rounded bg-muted p-2 text-xs">{"System prompt is generated server-side."}</pre>
               </details>
               <details>
                 <summary className="cursor-pointer text-sm font-medium">Assembled Retrieval Context (Collapsible)</summary>
-                <pre className="mt-2 max-h-72 overflow-auto rounded bg-muted p-2 text-xs">{trace.promptContext.assembledContext}</pre>
+                <pre className="mt-2 max-h-72 overflow-auto rounded bg-muted p-2 text-xs">{trace.prompt_context.assembled_context}</pre>
               </details>
             </Card>
           </TabsContent>
@@ -122,7 +122,7 @@ export function RetrievalDebugWorkbench() {
               <h2 className="font-medium">Evidence / Citations</h2>
               <ul className="space-y-1 text-sm">
                 {trace.response.citations.map((citation) => (
-                  <li key={`${citation.chunkId}-${citation.sectionTitle ?? "none"}`}>{citation.chunkId} · {citation.sectionTitle ?? "n/a"}</li>
+                  <li key={`${citation.chunk_id}-${citation.section_title ?? "none"}`}>{citation.chunk_id} · {citation.section_title ?? "n/a"}</li>
                 ))}
               </ul>
             </Card>
@@ -133,11 +133,11 @@ export function RetrievalDebugWorkbench() {
               <h2 className="font-medium">Deterministic Insights Panel</h2>
               <div className="space-y-2">
                 {trace.insights.map((insight) => (
-                  <div key={insight.insightId} className="rounded-md border border-border p-3 text-sm">
+                  <div key={insight.insight_id} className="rounded-md border border-border p-3 text-sm">
                     <div className="mb-2 flex items-center gap-2">
                       <span className="font-medium">{insight.title}</span>
                       <Badge className={severityClasses(insight.severity)}>{insight.severity}</Badge>
-                      <Badge>{insight.generatedBy}</Badge>
+                      <Badge>{insight.generated_by}</Badge>
                     </div>
                     <p className="text-muted-foreground">{insight.description}</p>
                   </div>
