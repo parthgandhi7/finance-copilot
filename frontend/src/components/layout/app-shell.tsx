@@ -7,7 +7,8 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/upload", label: "Upload" },
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/chat", label: "Copilot Chat" }
+  { href: "/chat", label: "Copilot Chat" },
+  { href: "/workbench/extraction", label: "Extraction Workbench" }
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
