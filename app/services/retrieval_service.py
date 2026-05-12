@@ -1,43 +1,21 @@
 from __future__ import annotations
 
-import hashlib
-import math
 import time
-from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.document import DocumentChunk, DocumentExtraction
-
-EMBEDDING_DIM = 1536
-SECTION_BOOST_TERMS = ("exclusions", "waiting", "coverage", "allocation")
-
-
-@dataclass
-class RetrievalTrace:
-    retrieval_latency_ms: float
-    classification_latency_ms: float
-    insight_latency_ms: float
-    top_scores: list[float]
-    chunk_ids: list[str]
+from app.models.document import DocumentChunk
+from app.services.embedding_service import EmbeddingService
 
 
 class RetrievalService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+        self.embedding_service = EmbeddingService()
 
-    def _embed(self, text: str) -> list[float]:
-        digest = hashlib.sha256(text.lower().encode()).digest()
-        vals = [(digest[i % len(digest)] / 255.0) * 2 - 1 for i in range(EMBEDDING_DIM)]
-        norm = math.sqrt(sum(v * v for v in vals)) or 1.0
-        return [v / norm for v in vals]
-
-    def _cosine(self, a: list[float], b: list[float]) -> float:
-        return sum(x * y for x, y in zip(a, b))
-
-    def classify_query(self, query: str) -> tuple[str, str]:
+    def classify_query(self, query: str) -> tuple[str, float, str]:
         q = query.lower()
         rules = {
             "waiting_periods": ["waiting", "ped", "pre-existing"],
@@ -53,92 +31,89 @@ class RetrievalService:
         }
         for label, kws in rules.items():
             if any(k in q for k in kws):
-                return label, "rule"
-        return "clarification", "llm_fallback"
+                return label, 0.9, "rule"
+        return "clarification", 0.5, "model"
 
     async def retrieve(self, query: str, top_k: int = 5, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         start = time.perf_counter()
-        class_start = time.perf_counter()
-        query_class, route = self.classify_query(query)
-        class_latency = (time.perf_counter() - class_start) * 1000
+        label, conf, method = self.classify_query(query)
+        query_embedding = await self.embedding_service.embed_text(query)
 
-        stmt: Select[tuple[DocumentChunk]] = select(DocumentChunk)
-        if filters:
-            if document_type := filters.get("document_type"):
-                stmt = stmt.join(DocumentExtraction, DocumentExtraction.id == DocumentChunk.extraction_id).where(
-                    DocumentExtraction.structured_json["document_type_hints"].astext.ilike(f"%{document_type}%")
-                )
-            if chunk_type := filters.get("chunk_type"):
-                stmt = stmt.where(DocumentChunk.chunk_type == chunk_type)
-            if source_document_id := filters.get("source_document_id"):
-                stmt = stmt.where(DocumentChunk.document_id == source_document_id)
+        stmt: Select = select(DocumentChunk, DocumentChunk.embedding.cosine_distance(query_embedding).label("distance"))
+        stmt = stmt.where(DocumentChunk.embedding.is_not(None))
 
-        chunks = (await self.session.execute(stmt)).scalars().all()
-        qv = self._embed(query)
+        if filters and (source_document_id := filters.get("source_document_id")):
+            stmt = stmt.where(DocumentChunk.document_id == source_document_id)
+        if filters and (chunk_type := filters.get("chunk_type")):
+            stmt = stmt.where(DocumentChunk.chunk_type == chunk_type)
 
-        scored = []
-        for chunk in chunks:
-            ev = chunk.embedding if chunk.embedding else self._embed(chunk.chunk_text)
-            score = self._cosine(qv, ev)
-            section = (chunk.section_name or "").lower()
-            if any(term in section for term in SECTION_BOOST_TERMS):
-                score += 0.1
-            scored.append((score, chunk))
+        stmt = stmt.order_by("distance").limit(top_k)
+        rows = (await self.session.execute(stmt)).all()
 
-        scored.sort(key=lambda x: x[0], reverse=True)
-        picked = scored[:top_k]
+        retrieved = []
+        context_parts = []
+        for chunk, distance in rows:
+            similarity = max(0.0, 1 - float(distance))
+            retrieved.append(
+                {
+                    "chunk_id": str(chunk.id),
+                    "document_id": str(chunk.document_id),
+                    "section_title": chunk.section_name,
+                    "page_number": chunk.page_number,
+                    "similarity_score": round(similarity, 4),
+                    "chunk_type": chunk.chunk_type,
+                    "content": chunk.chunk_text,
+                    "retrieval_reason": "Top cosine similarity match in pgvector index",
+                }
+            )
+            context_parts.append(f"[{chunk.id}] {chunk.chunk_text}")
 
-        insight_start = time.perf_counter()
-        insights = self.generate_insights(query_class, picked)
-        insight_latency = (time.perf_counter() - insight_start) * 1000
-
-        retrieval_latency = (time.perf_counter() - start) * 1000
-        top_scores = [round(s, 4) for s, _ in picked]
-        chunk_ids = [str(c.id) for _, c in picked]
+        assembled_context = "\n\n".join(context_parts)
+        answer = self.build_grounded_response(label, retrieved)
 
         return {
             "query": query,
-            "classification": {"label": query_class, "route": route},
-            "retrieved_chunks": [
-                {
-                    "chunk_id": str(c.id),
-                    "text": c.chunk_text,
-                    "similarity_score": round(s, 4),
-                    "section_title": c.section_name,
-                    "page_number": c.page_number,
-                    "chunk_type": c.chunk_type,
-                    "extraction_method": c.extraction_method,
-                    "source_document_id": str(c.document_id),
-                }
-                for s, c in picked
-            ],
-            "prompt_context": "\n\n".join([f"[{str(c.id)}] {c.chunk_text[:300]}" for _, c in picked]),
-            "ai_response": self.build_grounded_response(query_class, picked),
-            "generated_insights": insights,
-            "debug_trace": {
-                "retrieval_latency_ms": round(retrieval_latency, 2),
-                "classification_latency_ms": round(class_latency, 2),
-                "insight_generation_latency_ms": round(insight_latency, 2),
-                "top_k_scores": top_scores,
-                "retrieved_chunk_ids": chunk_ids,
-                "grounding_coverage": 1.0 if picked else 0.0,
+            "classification": {"label": label, "confidence": conf, "method": method},
+            "retrieval": {
+                "latency_ms": round((time.perf_counter() - start) * 1000, 2),
+                "filters": filters or [],
+                "chunks": retrieved,
             },
+            "prompt_context": {
+                "assembled_context": assembled_context,
+                "estimated_tokens": max(1, len(assembled_context) // 4),
+            },
+            "response": {
+                "answer": answer,
+                "grounded": bool(retrieved),
+                "citations": [
+                    {"chunk_id": c["chunk_id"], "section_title": c.get("section_title"), "page_number": c.get("page_number")}
+                    for c in retrieved[:5]
+                ],
+            },
+            "insights": self.generate_insights(retrieved),
         }
 
-    def build_grounded_response(self, query_class: str, picked: list[tuple[float, DocumentChunk]]) -> str:
-        if not picked:
+    def build_grounded_response(self, query_class: str, chunks: list[dict[str, Any]]) -> str:
+        if not chunks:
             return "No grounded evidence found in indexed documents."
-        evidence = "; ".join([f"{(c.section_name or 'Section')} [Chunk: {c.id}]" for _, c in picked[:3]])
-        return f"Query class `{query_class}` grounded in: {evidence}."
+        top = chunks[0]
+        return (
+            f"Based on retrieved evidence for '{query_class}', the strongest relevant section is "
+            f"{top.get('section_title') or 'Untitled'} (page {top.get('page_number') or 'n/a'})."
+        )
 
-    def generate_insights(self, query_class: str, picked: list[tuple[float, DocumentChunk]]) -> list[dict[str, Any]]:
-        insights: list[dict[str, Any]] = []
-        for _, chunk in picked:
-            text = chunk.chunk_text.lower()
-            if "waiting period" in text and any(x in text for x in ["36", "48"]):
-                insights.append({"insight_id": f"ins-{chunk.id}", "insight_type": "high_PED_waiting_period", "severity": "high", "title": "High PED waiting period detected", "description": "Waiting period appears above 24 months.", "evidence": [chunk.chunk_text[:180]], "source_chunks": [str(chunk.id)], "confidence": 0.9, "generated_by": "rule"})
-            if "room rent" in text and "cap" in text:
-                insights.append({"insight_id": f"ins-{chunk.id}", "insight_type": "room_rent_cap_detected", "severity": "medium", "title": "Room rent cap clause", "description": "Room rent cap clause appears present.", "evidence": [chunk.chunk_text[:180]], "source_chunks": [str(chunk.id)], "confidence": 0.85, "generated_by": "rule"})
-            if query_class == "allocation" and "small cap" in text:
-                insights.append({"insight_id": f"ins-{chunk.id}", "insight_type": "high_small_cap_allocation", "severity": "medium", "title": "Small-cap concentration", "description": "Small-cap allocation language detected.", "evidence": [chunk.chunk_text[:180]], "source_chunks": [str(chunk.id)], "confidence": 0.8, "generated_by": "rule"})
-        return insights[:5]
+    def generate_insights(self, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not chunks:
+            return []
+        return [
+            {
+                "insight_id": f"coverage-{chunks[0]['chunk_id']}",
+                "insight_type": "retrieval_coverage",
+                "severity": "low",
+                "title": "Retrieved grounded evidence",
+                "description": f"Top-{len(chunks)} chunks pulled from pgvector index.",
+                "source_chunks": [c["chunk_id"] for c in chunks],
+                "generated_by": "rule",
+            }
+        ]

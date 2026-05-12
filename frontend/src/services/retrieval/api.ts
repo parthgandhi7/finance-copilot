@@ -1,17 +1,14 @@
 import { RetrievalDebugRequest, RetrievalTrace } from "./types";
-import { runRetrievalDebugMock } from "./mock";
-
-const USE_MOCK = true;
 
 export async function runRetrievalDebug(request: RetrievalDebugRequest): Promise<RetrievalTrace> {
-  if (USE_MOCK) {
-    return runRetrievalDebugMock(request);
-  }
-
   const response = await fetch("/api/v1/retrieval/debug", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
+    body: JSON.stringify({
+      query: request.query,
+      top_k: request.topK ?? 8,
+      filters: request.filters ?? {},
+    }),
   });
 
   if (!response.ok) {

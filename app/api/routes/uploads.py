@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import AsyncSessionLocal, get_db_session
 from app.models.document import DocumentChunk, DocumentExtraction, DocumentStatus
 from app.services.document_service import DocumentService
+from app.services.embedding_service import EmbeddingService
 from app.services.pdf_extraction_service import PDFExtractionService
 
 router = APIRouter()
@@ -61,16 +62,20 @@ async def _run_extraction_job(document_id: UUID) -> None:
             session.add(extraction_row)
             await session.flush()
 
+            embedding_service = EmbeddingService()
             for chunk in extraction.get("semantic_chunks", []):
+                chunk_text = chunk.get("text", "")
+                embedding = await embedding_service.embed_text(chunk_text)
                 session.add(
                     DocumentChunk(
                         document_id=document.id,
                         extraction_id=extraction_row.id,
-                        chunk_text=chunk.get("text", ""),
+                        chunk_text=chunk_text,
                         section_name=chunk.get("heading"),
                         page_number=chunk.get("page_number"),
                         chunk_type=chunk.get("chunk_type", "paragraph"),
-                        extraction_method="rule_based",
+                        extraction_method="semantic_section_aware",
+                        embedding=embedding,
                     )
                 )
 
