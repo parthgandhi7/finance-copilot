@@ -18,6 +18,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     op.create_table(
         "documents",
         sa.Column("id", sa.UUID(), nullable=False),
@@ -59,9 +60,11 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["extraction_id"], ["document_extractions.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
+    op.create_index("ix_document_chunks_embedding", "document_chunks", ["embedding"], postgresql_using="ivfflat")
 
 
 def downgrade() -> None:
+    op.drop_index("ix_document_chunks_embedding", table_name="document_chunks")
     op.drop_table("document_chunks")
     op.drop_table("document_extractions")
     op.drop_table("documents")
