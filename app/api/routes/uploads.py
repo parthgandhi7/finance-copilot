@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+import asyncio
+
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,7 +42,7 @@ async def _run_extraction_job(document_id: UUID) -> None:
         await session.commit()
 
         try:
-            extraction = PDFExtractionService().extract(document.storage_path)
+            extraction = await run_in_threadpool(PDFExtractionService().extract, document.storage_path)
             version_result = await session.execute(
                 select(func.coalesce(func.max(DocumentExtraction.extraction_version), 0)).where(
                     DocumentExtraction.document_id == document.id
@@ -178,7 +181,13 @@ async def upload_and_extract_document(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     document = await DocumentService(session).save_upload(file)
-    extraction = PDFExtractionService().extract(document.storage_path)
+    try:
+        extraction = await asyncio.wait_for(
+            run_in_threadpool(PDFExtractionService().extract, document.storage_path),
+            timeout=120,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Extraction timed out after 120 seconds")
     return {
         "id": str(document.id),
         "filename": document.filename,
