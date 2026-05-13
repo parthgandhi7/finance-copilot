@@ -2,8 +2,13 @@
 
 import { useState, DragEvent } from "react";
 import { UploadCloud } from "lucide-react";
-import { useMutation } from "@tanstack/react-query";
-import { uploadPdfAction } from "@/app/actions";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  uploadDocumentAction,
+  triggerExtractionAction,
+  getExtractionStatusAction,
+  getStructuredDataAction,
+} from "@/app/actions";
 import { useCopilotStore } from "@/store/use-copilot-store";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -18,19 +23,51 @@ type ExtractionResult = {
 export function UploadPanel() {
   const [file, setFile] = useState<File | null>(null);
   const [extractedResult, setExtractedResult] = useState<ExtractionResult | null>(null);
+  const [uploadedDocId, setUploadedDocId] = useState<string | null>(null);
+  const [extractionError, setExtractionError] = useState<string | null>(null);
   const addDocument = useCopilotStore((s) => s.addDocument);
 
   const uploadMutation = useMutation({
     mutationFn: async (uploadFile: File) => {
       const formData = new FormData();
       formData.append("file", uploadFile);
-      return uploadPdfAction(formData);
+      const doc = await uploadDocumentAction(formData);
+      await triggerExtractionAction(doc.id);
+      return doc;
     },
-    onSuccess: ({ extracted, ...document }) => {
-      addDocument(document);
+    onSuccess: (doc) => {
+      addDocument({
+        id: doc.id,
+        name: doc.filename,
+        status: "ready" as const,
+        uploadedAt: new Date().toISOString().slice(0, 10),
+        size: `${(doc.file_size / 1024 / 1024).toFixed(2)} MB`,
+      });
       setFile(null);
-      setExtractedResult(extracted);
+      setUploadedDocId(doc.id);
+      setExtractionError(null);
     },
+  });
+
+  const isPolling =
+    !!uploadedDocId && !extractedResult && !extractionError;
+
+  useQuery({
+    queryKey: ["extraction-status", uploadedDocId],
+    queryFn: async () => {
+      const { status } = await getExtractionStatusAction(uploadedDocId!);
+      if (status === "extracted") {
+        const structured = await getStructuredDataAction(uploadedDocId!);
+        setExtractedResult(structured);
+        setUploadedDocId(null);
+      } else if (status === "failed") {
+        setExtractionError("Extraction failed. Please try again.");
+        setUploadedDocId(null);
+      }
+      return status;
+    },
+    enabled: isPolling,
+    refetchInterval: isPolling ? 2000 : false,
   });
 
   function onDrop(event: DragEvent<HTMLDivElement>) {
@@ -39,13 +76,18 @@ export function UploadPanel() {
     if (dropped?.type === "application/pdf") {
       setFile(dropped);
       setExtractedResult(null);
+      setExtractionError(null);
     }
   }
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     setFile(e.target.files?.[0] ?? null);
     setExtractedResult(null);
+    setExtractionError(null);
   }
+
+  const isPending = uploadMutation.isPending || isPolling;
+  const buttonLabel = uploadMutation.isPending ? "Uploading..." : isPolling ? "Extracting..." : "Upload PDF";
 
   return (
     <div className="flex flex-col gap-6">
@@ -61,14 +103,15 @@ export function UploadPanel() {
           <input type="file" accept="application/pdf" className="mt-4 block text-sm" onChange={onFileChange} />
           <Button
             className="mt-4"
-            disabled={!file || uploadMutation.isPending}
+            disabled={!file || isPending}
             onClick={() => file && uploadMutation.mutate(file)}
           >
-            {uploadMutation.isPending ? "Uploading..." : "Upload PDF"}
+            {buttonLabel}
           </Button>
-          {uploadMutation.isError && (
+          {(uploadMutation.isError || extractionError) && (
             <p className="mt-3 text-sm text-destructive">
-              {uploadMutation.error instanceof Error ? uploadMutation.error.message : "Upload failed"}
+              {extractionError ??
+                (uploadMutation.error instanceof Error ? uploadMutation.error.message : "Upload failed")}
             </p>
           )}
         </div>

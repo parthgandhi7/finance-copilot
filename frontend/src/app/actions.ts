@@ -2,33 +2,49 @@
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8000";
 
-export async function uploadPdfAction(formData: FormData) {
-  const file = formData.get("file");
-  if (!(file instanceof File)) {
-    throw new Error("No file provided");
-  }
-
-  const res = await fetch(`${BACKEND_URL}/api/v1/documents/upload-and-extract`, {
+export async function uploadDocumentAction(formData: FormData): Promise<{ id: string; filename: string; file_size: number }> {
+  const res = await fetch(`${BACKEND_URL}/api/v1/documents/upload`, {
     method: "POST",
     body: formData,
   });
-
   if (!res.ok) {
     throw new Error(`Upload failed: ${res.status} ${res.statusText}`);
   }
-
   const data = await res.json();
+  return { id: String(data.id), filename: data.filename, file_size: data.file_size };
+}
 
+export async function triggerExtractionAction(documentId: string): Promise<{ id: string; status: string }> {
+  const res = await fetch(`${BACKEND_URL}/api/v1/documents/${documentId}/extract`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to start extraction: ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function getExtractionStatusAction(documentId: string): Promise<{ id: string; status: string }> {
+  const res = await fetch(`${BACKEND_URL}/api/v1/documents/${documentId}/status`);
+  if (!res.ok) {
+    throw new Error(`Status check failed: ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function getStructuredDataAction(documentId: string): Promise<{
+  raw_text: string;
+  structured_sections: { heading: string; content: string }[];
+  document_type_hints: string[];
+}> {
+  const res = await fetch(`${BACKEND_URL}/api/v1/documents/${documentId}/structured`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch structured data: ${res.status} ${res.statusText}`);
+  }
+  const data = await res.json();
   return {
-    id: String(data.id),
-    name: data.filename,
-    status: "ready" as const,
-    uploadedAt: new Date().toISOString().slice(0, 10),
-    size: `${(data.file_size / 1024 / 1024).toFixed(2)} MB`,
-    extracted: {
-      raw_text: (data.extracted?.raw_text ?? "") as string,
-      structured_sections: (data.extracted?.structured_sections ?? []) as { heading: string; content: string }[],
-      document_type_hints: (data.extracted?.document_type_hints ?? []) as string[],
-    },
+    raw_text: "",
+    structured_sections: (data.structured_sections ?? []) as { heading: string; content: string }[],
+    document_type_hints: (data.document_type_hints ?? []) as string[],
   };
 }
